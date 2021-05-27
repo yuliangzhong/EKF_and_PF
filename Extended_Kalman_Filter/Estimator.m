@@ -2,7 +2,7 @@ function [posEst,linVelEst,oriEst,windEst,driftEst,...
           posVar,linVelVar,oriVar,windVar,driftVar,estState] = ...
     Estimator(estState,actuate,sense,tm,estConst)
 % [posEst,linVelEst,oriEst,windEst,driftEst,...
-%    posVar,linVelVar,oriVar,windVar,driftVar,estState] = 
+%  posVar,linVelVar,oriVar,windVar,driftVar,estState] = 
 % Estimator(estState,actuate,sense,tm,estConst)
 %
 % The estimator.
@@ -66,35 +66,46 @@ function [posEst,linVelEst,oriEst,windEst,driftEst,...
 %% Initialization
 if (tm == 0)
     % Do the initialization of your estimator here!
+    R = estConst.StartRadiusBound;
+    p_bar = estConst.RotationStartBound;
+    r_bar = estConst.WindAngleStartBound;
     
     % initial state mean
-    posEst = ... % 1x2 matrix
-    linVelEst = ... % 1x2 matrix
-    oriEst = ... % 1x1 matrix
-    windEst = ... % 1x1 matrix
-    driftEst = ... % 1x1 matrix
+    posEst = [0,0]; % 1x2 matrix
+    linVelEst = [0,0]; % 1x2 matrix
+    oriEst = 0; % 1x1 matrix
+    windEst = 0; % 1x1 matrix
+    driftEst = 0; % 1x1 matrix
     
     % initial state variance
-    posVar = ... % 1x2 matrix
-    linVelVar = ... % 1x2 matrix
-    oriVar = ... % 1x1 matrix
-    windVar = ... % 1x1 matrix
-    driftVar = ... % 1x1 matrix
+    posVar = [pi/4*R^4,pi/4*R^4]; % 1x2 matrix
+    linVelVar = [0,0]; % 1x2 matrix
+    oriVar = p_bar*p_bar/3; % 1x1 matrix
+    windVar = r_bar*r_bar/3; % 1x1 matrix
+    driftVar = 0; % 1x1 matrix
     
     % estimator variance init (initial posterior variance)
-    estState.Pm = ...
+    estState.Pm = diag([posVar(1),posVar(2),linVelVar(1),linVelVar(2),oriVar,windVar,driftVar]);
     % estimator state
-    estState.xm = ...
+    estState.xm = [posEst, linVelEst, oriEst, windEst, driftEst];
     % time of last update
     estState.tm = tm;
 end
 
 %% Estimator iteration.
 % get time since last estimator update
-dt = ...
+dt = tm - estState.tm;
+disp(dt); % should be 0.1
 estState.tm = tm; % update measurement update time
 
 % prior update
+t_span = [tm-dt tm];
+y0 = estState.xm;
+[t,y] = ode45(@(t,y) odefcn(t,y,actuate,estConst), t_span, y0);
+xp = y(tm);
+
+P0 = estState.Pm;
+
 
 % measurement update
 

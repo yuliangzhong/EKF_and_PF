@@ -1,10 +1,8 @@
 function trackErrorNorm=run(simConst,estConst,doplot,seed)
 %
-%
 % Main function for the Particle Filter programming exercise.
 % It is used to simulate the true model, call the estimator and show the 
 % results.
-%
 %
 % Class:
 % Recursive Estimation
@@ -21,7 +19,6 @@ function trackErrorNorm=run(simConst,estConst,doplot,seed)
 % clear command window, close figures
 clc;
 close all;
-
 
 if nargin==0
    % Define the simulation constants that are used in simulation, but not 
