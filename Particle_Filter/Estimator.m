@@ -50,9 +50,11 @@ function [postParticles] = Estimator(prevPostParticles, sens, act, estConst, km)
 % Raffaello D'Andrea, Matthias Hofer, Carlo Sferrazza
 % hofermat@ethz.ch
 % csferrazza@ethz.ch
-
+%% Configuration here
 % Set number of particles:
-N = 1000; % N_particles, obviously, you will need more particles than 10.
+N = 2000; % N_particles 10k->16min;
+ratio = 10; % massive sampling ratio if all of particles fail
+K = 0.01; % roughening param
 
 %% Mode 1: Initialization
 if (km == 0)
@@ -90,7 +92,7 @@ end % end init
 % x^n_p(k) = q_k?1(x^n_m(k-1),v^n(k-1))
 % define v^n(k-1)
 v_f   = estConst.sigma_f * (rand(1,N) - 0.5);
-v_phi = estConst.sigma_phi * ( rand(1,N) - 0.5);
+v_phi = estConst.sigma_phi * (rand(1,N) - 0.5);
 % define x^n_p(k)
 postParticles.x_r = prevPostParticles.x_r + (act(1) + v_f) .* cos(prevPostParticles.phi);
 postParticles.y_r = prevPostParticles.y_r + (act(1) + v_f) .* sin(prevPostParticles.phi);
@@ -98,17 +100,92 @@ postParticles.phi = prevPostParticles.phi + act(2) + v_phi;
 postParticles.kappa = prevPostParticles.kappa;
 
 % Posterior Update:
-% scale: --->  beta_n = alpha*p(z|x), sum(beta_n) = 1
-% step1: get z by calling get_distance
+% scale: --->  beta_n = alpha*p(sens|xp), sum(beta_n) = 1
+z = zeros(1,N);
+p_sens = zeros(1,N);
+for k = 1:N
+    z(k) = get_distance(postParticles.x_r(k),postParticles.y_r(k),postParticles.phi(k),postParticles.kappa(k),estConst.contour);
+    p_sens(k) = pdf(sens - z(k), estConst.epsilon);
+end
+SUM = sum(p_sens);
+% what if sum(p_sens)=0 ?
+% that means num of particles is not big enough
+% Remedy with more intensive sampling!
+% call intensive_sampling()
+while SUM==0
+    disp("Warning, sum(p_sens) = 0, intensive resampling!")
+    disp(km)
+    M = ratio*N; % intensive sampling number
+    % sample kappa
+    kappa = 2 * estConst.l * rand(1,M) - estConst.l;
+    % uniformly sample x and y in rectangle
+    posx = (3-kappa) .* rand(1,M) + kappa; 
+    posy = 3 * rand(1,M);                
+    % discard samples outside map
+    for i=1:M
+        if ~Is_inmap(posx(i),posy(i))
+            posx(i) = nan;
+            posy(i) = nan;
+        end
+    end
+    % resampling result
+    index = ~isnan(posx);
+    posx = posx(index);
+    posy = posy(index);
+    kappa = kappa(index);
+    len = length(posx);
+    phi = 2*pi* rand(1,len)-pi;
+    % calculate p(z|x)
+    z_tmp = zeros(1,len);
+    p_tmp = zeros(1,len);
+    for k = 1:len
+        z_tmp(k) = get_distance(posx(k),posy(k),phi(k),kappa(k),estConst.contour);
+        p_tmp(k) = pdf(sens - z_tmp(k), estConst.epsilon);
+    end
+    [p_sens,Ind] = maxk(p_tmp,N);
+    postParticles.x_r = posx(Ind);
+    postParticles.y_r = posy(Ind);
+    postParticles.phi = phi(Ind);
+    postParticles.kappa = kappa(Ind);
+    SUM = sum(p_sens);
+end
+beta_n = p_sens / SUM; % i.e. --> beta_n
 
+% resampling from old particles
+% xm = resampling(beta_n);
+cumSUM = cumsum(beta_n);
+ind = zeros(1,N);
+for i = 1:N
+    r = rand();
+    j = N;
+    while r<= cumSUM(j-1)
+        j = j-1;
+        if j==1
+            break;
+        end
+    end
+    ind(i) = j;
+end
+for k = 1:N
+    postParticles.x_r(k) = postParticles.x_r(ind(k));
+    postParticles.y_r(k) = postParticles.y_r(ind(k));
+    postParticles.phi(k) = postParticles.phi(ind(k));
+    postParticles.kappa(k) = postParticles.kappa(ind(k));
+end
 
+% roughening: Lecture11 Page23
+Ex = max(postParticles.x_r) - min(postParticles.x_r);
+Ey = max(postParticles.y_r) - min(postParticles.y_r);
+Ep = max(postParticles.phi) - min(postParticles.phi);
+Ek = max(postParticles.kappa) - min(postParticles.kappa);
 
-
-
-
-postParticles.x_r = ...
-postParticles.y_r = ...
-postParticles.phi = ...
-postParticles.kappa = ...
+sigma_x = K * Ex * N^(-1/4);
+sigma_y = K * Ey * N^(-1/4);
+sigma_p = K * Ep * N^(-1/4);
+sigma_k = K * Ek * N^(-1/4);
+postParticles.x_r = postParticles.x_r + sigma_x*randn(1,N);
+postParticles.y_r = postParticles.y_r + sigma_y*randn(1,N);
+postParticles.phi = postParticles.phi + sigma_p*randn(1,N);
+postParticles.kappa = postParticles.kappa + sigma_k*randn(1,N);
 
 end % end estimator
