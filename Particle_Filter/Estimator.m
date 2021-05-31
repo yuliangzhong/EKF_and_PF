@@ -53,22 +53,27 @@ function [postParticles] = Estimator(prevPostParticles, sens, act, estConst, km)
 
 %% Configuration here
 
-Sampling_globally = 1;
-Sampling_locally = 0;
+% remedy policy defination
+% remedy if all probability of particles is zero
+Sampling_globally = 0;
+Sampling_locally = 1;
 right_equal = 2;
-% Set number of particles:
-N = 1000; % N_particles 10k->16min;
-remedy_method = 5; % Sampling_locally; % Sampling_globally / Sampling_locally / right_equal
-global_ratio = 10; % massive sampling ratio if all of particles fail, if sampling globally
-local_variance = 0.2/3; % sample locally -> N(0,localvariance^2), s.t. 3sigma<0.2
-K = 0.01; % roughening param
+heuristic = 3;
 
+remedy_policy = heuristic; % Sampling_locally; % Sampling_globally / Sampling_locally / right_equal / heuristic
+local_variance = 0.2/3; % if sampling locally -> N(0,localvariance^2), s.t. 3sigma<0.1
+
+% Set number of particles:
+N = 1000; % N_particles
+
+% Set roughening parameter
+K = 0.01;
 
 %% Mode 1: Initialization
 
 if (km == 0)
     % Do the initialization of your estimator here!
-    % (x,y) uniformly distributed in circle R. 
+    % let (x,y) uniformly distributed in circle R. 
     % We can prove that (r^2, theta) is also uniformly distributed
     % see blog here: https://www.cnblogs.com/tenosdoit/p/4025221.html
     
@@ -98,7 +103,8 @@ end % end init
 % If km > 0, we perform a regular update of the estimator.
 % Implement your estimator here!
 
-% Prior Update:
+%% Prior Update:
+
 % x^n_p(k) = q_k-1(x^n_m(k-1),v^n(k-1))
 % define v^n(k-1)
 v_f   = estConst.sigma_f * (rand(1,N) - 0.5);
@@ -109,26 +115,29 @@ postParticles.y_r = prevPostParticles.y_r + (act(1) + v_f) .* sin(prevPostPartic
 postParticles.phi = prevPostParticles.phi + act(2) + v_phi;
 postParticles.kappa = prevPostParticles.kappa;
 
-% Posterior Update:
+%% Posterior Update:
+
 % scale: --->  beta_n = alpha*p(sens|xp), sum(beta_n) = 1
-z = zeros(1,N);
-p_sens = zeros(1,N);
+z = zeros(1,N); % measurements
+p_sens = zeros(1,N); % probability
+
+% for each particle, estimate measurements z
 for k = 1:N
     z(k) = get_distance(postParticles.x_r(k),postParticles.y_r(k),postParticles.phi(k),postParticles.kappa(k),estConst.contour);
     p_sens(k) = pdf(sens - z(k), estConst.epsilon);
 end
 SUM = sum(p_sens);
+
 % what if sum(p_sens)=0 ?
-% that means num of particles is not big enough
-% Remedy with more intensive sampling!
-% call intensive_sampling()
+% Remedy it with "remedy_policy"!
 while SUM==0
-    disp("Warning, sum(p_sens) = 0, intensive resampling! At time = "+num2str(km))
+    disp("sum(p_sens) = 0, Remedy now! At time = " + num2str(km))
     
-    if remedy_method == Sampling_globally
-        M = global_ratio*N; % intensive sampling number
-        % sample kappa: 2 methods
-        kappa = 0.2*(2 * estConst.l * rand(1,M) - estConst.l); % 0.2*U[-L,L]
+    % Policy 1: Sampling globally ---------------------------------------
+    if remedy_policy == Sampling_globally 
+        M = 10 * N; % intensive sampling number
+        % sample kappa:
+        kappa = 2 * estConst.l * rand(1,M) - estConst.l; % U[-L,L]
         % uniformly sample x and y in rectangle
         posx = (3-kappa) .* rand(1,M) + kappa; 
         posy = 3 * rand(1,M);                
@@ -154,13 +163,14 @@ while SUM==0
             p_tmp(k) = pdf(sens - z_tmp(k), estConst.epsilon);
         end
         [p_sens,Ind] = maxk(p_tmp,N);
+        % update particles
         postParticles.x_r = posx(Ind);
         postParticles.y_r = posy(Ind);
         postParticles.phi = phi(Ind);
         postParticles.kappa = kappa(Ind);
-        
-        
-    elseif remedy_method == Sampling_locally
+
+    % Policy 2: Sampling locally ---------------------------------------    
+    elseif remedy_policy == Sampling_locally
         postParticles.x_r = postParticles.x_r + local_variance*randn(1,N);
         postParticles.y_r = postParticles.y_r + local_variance*randn(1,N);
         for k = 1:N
@@ -168,32 +178,56 @@ while SUM==0
             p_sens(k) = pdf(sens - z(k), estConst.epsilon);
         end
         
+    % Policy 3: Equal right ---------------------------------------            
+    elseif remedy_policy == right_equal % not recommended
+        p_sens = ones(1,N);
+    
+    % Policy 4: Heuristic ---------------------------------------            
+    elseif remedy_policy == heuristic
+        x_pos = mean(postParticles.x_r);
+        y_pos = mean(postParticles.y_r);
+        yaw_phi = mean(postParticles.phi);
+        Kappa = mean(postParticles.kappa);
+        % if not scan uncertain bound, resample locally
+        if ~If_scan_uncertain_bound(x_pos, y_pos, yaw_phi, Kappa, estConst.contour)
+            postParticles.x_r = postParticles.x_r + local_variance*randn(1,N);
+            postParticles.y_r = postParticles.y_r + local_variance*randn(1,N);
+            for k = 1:N
+                z(k) = get_distance(postParticles.x_r(k),postParticles.y_r(k),postParticles.phi(k),postParticles.kappa(k),estConst.contour);
+                p_sens(k) = pdf(sens - z(k), estConst.epsilon);
+            end
+        else
+            % if scan uncertain bound, resample kappa
+            disp('kappa')
+            postParticles.x_r = postParticles.x_r + 0.25*local_variance*randn(1,N);
+            postParticles.y_r = postParticles.y_r + 0.25*local_variance*randn(1,N);
+            postParticles.kappa = 2 * estConst.l * rand(1,N) - estConst.l;
+            for k = 1:N
+                z(k) = get_distance(postParticles.x_r(k),postParticles.y_r(k),postParticles.phi(k),postParticles.kappa(k),estConst.contour);
+                p_sens(k) = pdf(sens - z(k), estConst.epsilon);
+            end
+        end
         
-    elseif remedy_method == right_equal % not recommended
-        p_sens = 1/N * ones(1,N);
     else
-        disp("no remedy method, failure!")
+        disp("no remedy policy, failure!")
         break
     end
+    
     SUM = sum(p_sens);
 end
-beta_n = p_sens / SUM; % i.e. --> beta_n
 
-% resampling from old particles
-% xm = resampling(beta_n);
+beta_n = p_sens / SUM; % normalization, i.e. --> beta_n
+
+%% resampling from old particles
 cumSUM = cumsum(beta_n);
 ind = zeros(1,N);
 for i = 1:N
     r = rand();
-    j = N;
-    while r<= cumSUM(j-1)
-        j = j-1;
-        if j==1
-            break;
-        end
-    end
-    ind(i) = j;
+    indexs = find(cumSUM>=r);
+    ind(i) = indexs(1);
 end
+
+% resampling by selecting index
 for k = 1:N
     postParticles.x_r(k) = postParticles.x_r(ind(k));
     postParticles.y_r(k) = postParticles.y_r(ind(k));
@@ -201,7 +235,7 @@ for k = 1:N
     postParticles.kappa(k) = postParticles.kappa(ind(k));
 end
 
-% roughening: Lecture11 Page23
+%% roughening: Lecture11 Page23
 Ex = max(postParticles.x_r) - min(postParticles.x_r);
 Ey = max(postParticles.y_r) - min(postParticles.y_r);
 Ep = max(postParticles.phi) - min(postParticles.phi);
@@ -218,6 +252,9 @@ postParticles.kappa = postParticles.kappa + sigma_k*randn(1,N);
 
 end % end estimator
 
+
+
+%% Help Functions
 
 % how to know whether a ray and a line segment intersect?
 % the algorithm is adapted from the website below
@@ -250,6 +287,7 @@ function distance = get_distance(xr,yr,phi,kappa,contour)
     end
 end
 
+% probability density function of measurement noise w
 function pw = pdf(w,eps)
     w = abs(w);
     if w < 2*eps
@@ -263,6 +301,7 @@ function pw = pdf(w,eps)
     end
 end
 
+% return logic variable: in map = True, not in map = False
 function result = Is_inmap(x,y)
     cond1 = x<=0.5 && y<=0.5;
     cond2 = x<=1 && y>=2.5;
@@ -274,5 +313,32 @@ function result = Is_inmap(x,y)
         result = false;
     else
         result = true;
+    end
+end
+
+function result = If_scan_uncertain_bound(xr,yr,phi,kappa,contour)
+    % (x1,y1) --(x,y)-- (x2,y2)
+    x1 = kappa; y1 = contour(8,2);
+    x2 = kappa; y2 = contour(9,2);
+    % (x,y) = (x1,y1) + u(x2-x1,y2-y1)= (xr,yr) + t(cos(phi),sin(phi))
+    A = [x2 - x1, -cos(phi);
+         y2 - y1, -sin(phi)];
+    b = [xr - x1;
+         yr - y1];
+    if rank(A)~=rank([A,b]) % no solution
+        result = false;
+    elseif rank(A) < 2 
+        if dot([x1-xr; y1-yr],[cos(phi);sin(phi)])>0 % inf solutions => collinear
+            result = true;
+        else
+            result = false;
+        end
+    elseif rank(A) == 2 % unique solution
+        C = A\b;
+        if C(1)>=0 && C(1)<=1 && C(2)>=0
+            result = true;
+        else
+            result = false;
+        end
     end
 end
