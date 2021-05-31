@@ -2,6 +2,8 @@
 
 ## Introduction
 
+![](https://github.com/yuliangzhong/EKF_and_PF/blob/master/Particle_Filter/demos/fig.png)
+
 [A good video explaining Particle Filter clearly and vividly](https://www.youtube.com/watch?v=NrzmH_yerBU)
 
 ## Demos
@@ -9,7 +11,7 @@
 |demo1| demo2|
 |:---:|:---:|
 | Sampling globally/locally | Heuristic policy|
-|||
+|![](https://github.com/yuliangzhong/EKF_and_PF/blob/master/Particle_Filter/demos/demo1.gif)|![](https://github.com/yuliangzhong/EKF_and_PF/blob/master/Particle_Filter/demos/demo_advanced.gif)|
 
 ## Remarks
 
