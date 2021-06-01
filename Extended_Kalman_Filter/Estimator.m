@@ -78,33 +78,118 @@ if (tm == 0)
     driftEst = 0; % 1x1 matrix
     
     % initial state variance
-    posVar = [pi/4*R^4,pi/4*R^4]; % 1x2 matrix
+    posVar = [pi*(R^4)/4,pi*(R^4)/4]; % 1x2 matrix
     linVelVar = [0,0]; % 1x2 matrix
-    oriVar = p_bar*p_bar/3; % 1x1 matrix
-    windVar = r_bar*r_bar/3; % 1x1 matrix
+    oriVar = (p_bar^2)/3; % 1x1 matrix
+    windVar = (r_bar^2)/3; % 1x1 matrix
     driftVar = 0; % 1x1 matrix
     
+    % Initialization
+    % x = [px,py,phi,sx,sy,rho,b]
+    % v = [vd,vr,vrho,vb]
+    % z = [za,zb,zc,zy,zn]
+    % w = [wa,wb,wc,wg,wn]
+    
     % estimator variance init (initial posterior variance)
-    estState.Pm = diag([posVar(1),posVar(2),linVelVar(1),linVelVar(2),oriVar,windVar,driftVar]);
+    estState.Pm = diag([posVar(1), posVar(2), oriVar, linVelVar(1), linVelVar(2), windVar,  driftVar]);
     % estimator state
-    estState.xm = [posEst, linVelEst, oriEst, windEst, driftEst];
+    estState.xm = [posEst, oriEst, linVelEst, windEst, driftEst];
     % time of last update
     estState.tm = tm;
 end
 
 %% Estimator iteration.
+
+% x = [px,py,phi,sx,sy,rho,b]
+% v = [vd,vr,vrho,vb]
+% z = [za,zb,zc,zy,zn]
+% w = [wa,wb,wc,wg,wn]
+
+% load params
+Cdh = estConst.dragCoefficientHydr;
+Cda = estConst.dragCoefficientAir;
+Cr = estConst.rudderCoefficient;
+Cw = estConst.windVel;
+
+Qd = estConst.DragNoise; Qr = estConst.RudderNoise;
+Qrho = estConst.WindAngleNoise; Qb = estConst.GyroDriftNoise;
+sa = estConst.DistNoiseA; sb = estConst.DistNoiseB;
+sc = estConst.DistNoiseC; sg = estConst.GyroNoise;
+sn = estConst.CompassNoise;
+
 % get time since last estimator update
 dt = tm - estState.tm;
-disp(dt); % should be 0.1
 estState.tm = tm; % update measurement update time
 
-% prior update
-t_span = [tm-dt tm];
-y0 = estState.xm;
-[t,y] = ode45(@(t,y) odefcn(t,y,actuate,estConst), t_span, y0);
-xp = y(tm);
+% prior update:
+% solve y_dot = q(y,0,t) for t = [(k-1)T,kT], y((k-1)T) = xm(k-1)
+% solve P_dot = AP + PA' + LQL' for t = [(k-1)T,kT], P((k-1)T) = Pm(k-1)
 
-P0 = estState.Pm;
+t_span = [tm-dt tm]; % for t = [(k-1)T,kT]
+
+y0 = estState.xm; % y((k-1)T) = xm(k-1)
+P0 = estState.Pm; % P((k-1)T) = Pm(k-1)
+
+% x = [px,py,phi,sx,sy,rho,b]
+% v = [vd,vr,vrho,vb]
+
+SQT = @(y) sqrt((y(4) - Cw * cos(y(6)))^2 + (y(5) - Cw * sin(y(6)))^2);
+
+ydot = @(y) [y(4);
+             y(5);
+             Cr * actuate(2);
+             cos(y(3))*(tanh(actuate(1)) - Cdh*( x(4)^2 + x(5)^2)) - Cda*(y(4)-Cw*cos(y(6)))*SQT(y);
+             sin(y(3))*(tanh(actuate(1)) - Cdh*( x(4)^2 + x(5)^2)) - Cda*(y(5)-Cw*sin(y(6)))*SQT(y);
+             0;
+             0];
+
+% A = dq/dx | x=y, v=0
+% L = dq/dv | x=y, v=0
+A43 = @(y) -sin(y(3))*(tanh(actuate(1)) - Cdh*(y(4)^2+y(5)^2));
+A44 = @(y) -cos(y(3))*Cdh*2*y(4) - Cda*SQT(y) - Cda*(y(4)-Cw*cos(y(6)))^2/SQT(y);
+A45 = @(y) -cos(y(3))*Cdh*2*y(5) - Cda*(y(4)-Cw*cos(y(6)))*(y(5)-Cw*sin(y(6)))/SQT(y);
+A46 = @(y) -Cda*Cw*sin(y(6))*SQT(y) ...
+           -Cda*((y(4)-Cw*cos(y(6)))*(Cw*sin(y(6))*(y(4)-Cw*cos(y(6))) - Cw*cos(y(6))*(y(5)-Cw*sin(y(6)))))/SQT(y);
+A53 = @(y) cos(y(3))*(tanh(actuate(1)) - Cdh*(y(4)^2 + y(5)^2));
+A54 = @(y) -sin(y(3))*Cdh*2*y(4) - Cda*(y(5)-Cw*sin(y(6)))*(y(4)-Cw*cos(y(6)))/SQT(y);
+A55 = @(y) -sin(y(3))*Cdh*2*y(5) - Cda*SQT - Cda*(y(5)-Cw*sin(y(6)))^2/SQT(y);
+A56 = @(y) Cda*Cw*cos(y(6))*SQT(y) ...
+           -Cda*((y(5)-Cw*sin(y(6)))*(Cw*sin(y(6))*(y(4)-Cw*cos(y(6))) - Cw*cos(y(6))*(y(5)-Cw*sin(y(6)))))/SQT(y);
+       
+A = @(y) [0, 0, 0,      1,      0,      0,      0;
+          0, 0, 0,      0,      1,      0,      0;
+          0, 0, 0,      0,      0,      0,      0;
+          0, 0, A43(y), A44(y), A45(y), A46(y), 0;
+          0, 0, A53(y), A54(y), A55(y), A56(y), 0;
+          0, 0, 0,      0,      0,      0,      0;
+          0, 0, 0,      0,      0,      0,      0;];
+      
+L = @(y) [0,                              0,             0, 0;
+          0,                              0,             0, 0;
+          0,                              Cr*actuate(2), 0, 0;
+          -cos(y(3))*Cdh*(y(4)^2+y(5)^2), 0,             0, 0;
+          -sin(y(3))*Cdh*(y(4)^2+y(5)^2), 0,             0, 0;
+          0,                              0,             1, 0;
+          0,                              0,             0, 1;];
+      
+Q = diag([Qd, Qr, Qrho, Qb]);
+R = diag([sa, sb, sc, sg, sn]);
+
+Pdot = @(y) A(y)*P(y) + P(y)*A(y)' + L(y)*Q*L(y)';
+
+
+
+
+
+
+
+
+
+
+
+% [t,y] = ode45(@(t,y) odefcn(t,y,actuate,estConst), t_span, y0);
+% xp = y(tm);
+
 
 
 % measurement update
