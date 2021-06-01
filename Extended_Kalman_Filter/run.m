@@ -19,7 +19,7 @@ function [trackErrorNorm,angularErrorNorm,velocityErrorNorm,windErrorNorm,biasEr
 % csferrazza@ethz.ch
 
 % clear command window, close figures
-% clc;
+clc;
 close all;
 
 if nargin==0
@@ -136,9 +136,10 @@ initialVar = [posVar(1,:),linVelVar(1,:),oriVar(1),driftVar(1)];
 % Plots of the results.
 if doplot
     % planar position plot
-    figure(1)
+    %figure(1)
+    subplot(2,4,1);
     hold all
-    axis equal
+    %axis equal
     plot(state(:,1),state(:,2),'r.')
     plot(posEst(:,1),posEst(:,2),'b.')
     xlabel('x position [m]')
@@ -147,7 +148,8 @@ if doplot
     grid on
     
     % x position over time
-    figure(2)
+    % figure(2)
+    subplot(2,4,2);
     hold all
     plot(tm, state(:,1),'r.')
     plot(tm, posEst(:,1),'b.')
@@ -157,7 +159,8 @@ if doplot
     grid on
     
     % y position over time
-    figure(3)
+    % figure(3)
+    subplot(2,4,3);
     hold all
     plot(tm, state(:,2),'r.')
     plot(tm, posEst(:,2),'b.')
@@ -167,7 +170,8 @@ if doplot
     grid on
         
     % orientatin over time
-    figure(4)
+    % figure(4)
+    subplot(2,4,4);
     hold all
     plot(tm, state(:,5),'r.')
     plot(tm, oriEst(:),'b.')
@@ -177,7 +181,8 @@ if doplot
     grid on
     
     % x velocity over time
-    figure(5)
+    % figure(5)
+    subplot(2,4,5);
     hold all
     plot(tm, state(:,3),'r.')
     plot(tm, linVelEst(:,1),'b.')
@@ -187,7 +192,8 @@ if doplot
     grid on
     
     % y velocity over time
-    figure(6)
+    % figure(6)
+    subplot(2,4,6);
     hold all
     plot(tm, state(:,4),'r.')
     plot(tm, linVelEst(:,2),'b.')
@@ -197,7 +203,8 @@ if doplot
     grid on
     
     % drift over time
-    figure(7)
+    % figure(7)
+    subplot(2,4,7);
     hold all
     plot(tm, drift,'r.')
     plot(tm, driftEst(:),'b.')
@@ -207,7 +214,8 @@ if doplot
     grid on
     
     % wind speed over time
-    figure(8)
+    % figure(8)
+    subplot(2,4,8);
     hold all
     plot(tm, wind, 'r.')
     plot(tm, windEst(:),'b.')
